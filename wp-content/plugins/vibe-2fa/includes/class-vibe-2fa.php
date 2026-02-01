@@ -37,6 +37,9 @@ class Vibe_2FA {
 			'enable_captcha'    => true,
 			'recaptcha_site'    => '',
 			'recaptcha_secret'  => '',
+			'login_logo_url'    => '',
+			'login_logo_width'  => 84,
+			'login_logo_height' => 84,
 			'block_xmlrpc'      => false,
 			'enable_woocommerce'=> false,
 			'enable_pwned'      => false,
@@ -50,6 +53,7 @@ class Vibe_2FA {
 		require_once VIBE_2FA_PATH . 'admin/class-vibe-2fa-admin.php';
 		require_once VIBE_2FA_PATH . 'public/class-vibe-2fa-profile.php';
 		require_once VIBE_2FA_PATH . 'public/class-vibe-2fa-captcha.php';
+		require_once VIBE_2FA_PATH . 'public/class-vibe-2fa-branding.php';
 
 		$this->totp    = new Vibe_2FA_TOTP();
 		$this->captcha = new Vibe_2FA_Captcha( $this );
@@ -66,9 +70,12 @@ class Vibe_2FA {
 		$profile->hooks();
 
 		$this->captcha->hooks();
+		$branding = new Vibe_2FA_Branding( $this );
+		$branding->hooks();
 
 		add_filter( 'authenticate', array( $this, 'handle_authenticate' ), 30, 3 );
-		add_action( 'login_form_vibe_2fa', array( $this, 'render_2fa_form' ) );
+		add_action( 'login_init', array( $this, 'handle_2fa_post' ) );
+		add_action( 'login_footer', array( $this, 'render_2fa_inline' ) );
 		add_filter( 'xmlrpc_enabled', array( $this, 'maybe_block_xmlrpc' ) );
 	}
 
@@ -83,10 +90,6 @@ class Vibe_2FA {
 		return $enabled;
 	}
 
-	private function is_login_action() {
-		return isset( $_REQUEST['action'] ) && 'vibe_2fa' === $_REQUEST['action'];
-	}
-
 	private function is_xmlrpc_request() {
 		return defined( 'XMLRPC_REQUEST' ) && XMLRPC_REQUEST;
 	}
@@ -94,10 +97,6 @@ class Vibe_2FA {
 	public function handle_authenticate( $user, $username, $password ) {
 		if ( $this->is_xmlrpc_request() && ! empty( $this->options['block_xmlrpc'] ) ) {
 			return new WP_Error( 'vibe_2fa_xmlrpc_blocked', __( 'XML-RPC 로그인이 차단되었습니다.', 'vibe-2fa' ) );
-		}
-
-		if ( $this->is_login_action() ) {
-			return $user;
 		}
 
 		if ( is_wp_error( $user ) ) {
@@ -142,7 +141,6 @@ class Vibe_2FA {
 
 		$redirect = add_query_arg(
 			array(
-				'action'          => 'vibe_2fa',
 				'vibe_2fa_token'  => $token,
 			),
 			wp_login_url()
@@ -161,6 +159,22 @@ class Vibe_2FA {
 
 	private function delete_login_token( $token ) {
 		delete_transient( $this->get_login_token_key( $token ) );
+	}
+
+	private function get_error_key( $token ) {
+		return 'vibe_2fa_error_' . $token;
+	}
+
+	private function set_error_message( $token, $message ) {
+		set_transient( $this->get_error_key( $token ), $message, 5 * MINUTE_IN_SECONDS );
+	}
+
+	private function pop_error_message( $token ) {
+		$message = get_transient( $this->get_error_key( $token ) );
+		if ( $message ) {
+			delete_transient( $this->get_error_key( $token ) );
+		}
+		return $message;
 	}
 
 	private function is_2fa_required_for_user( WP_User $user ) {
@@ -196,54 +210,76 @@ class Vibe_2FA {
 		set_transient( $key, $counter, 15 * MINUTE_IN_SECONDS );
 	}
 
-	public function render_2fa_form() {
-		$token = isset( $_REQUEST['vibe_2fa_token'] ) ? sanitize_text_field( wp_unslash( $_REQUEST['vibe_2fa_token'] ) ) : '';
-		$error = '';
-
-		if ( 'POST' === $_SERVER['REQUEST_METHOD'] ) {
-			$token = isset( $_POST['vibe_2fa_token'] ) ? sanitize_text_field( wp_unslash( $_POST['vibe_2fa_token'] ) ) : '';
-			$code  = isset( $_POST['vibe_2fa_code'] ) ? sanitize_text_field( wp_unslash( $_POST['vibe_2fa_code'] ) ) : '';
-
-			$data = $this->get_login_token_data( $token );
-			if ( empty( $data['user_id'] ) ) {
-				$error = __( '인증 토큰이 만료되었습니다. 다시 로그인하세요.', 'vibe-2fa' );
-			} else {
-				$user_id = (int) $data['user_id'];
-				if ( $this->is_rate_limited( $user_id ) ) {
-					$error = __( '시도 횟수가 초과되었습니다. 잠시 후 다시 시도하세요.', 'vibe-2fa' );
-				} else {
-					$secret = get_user_meta( $user_id, 'vibe_2fa_secret', true );
-					if ( empty( $secret ) || ! $this->totp->verify( $secret, $code ) ) {
-						$this->record_failed_attempt( $user_id );
-						$error = __( '인증 코드가 올바르지 않습니다.', 'vibe-2fa' );
-					} else {
-						$this->delete_login_token( $token );
-						wp_set_current_user( $user_id );
-						wp_set_auth_cookie( $user_id, true );
-						do_action( 'vibe_2fa_login_success', $user_id );
-
-						$redirect = ! empty( $data['redirect_to'] ) ? $data['redirect_to'] : admin_url();
-						wp_safe_redirect( $redirect );
-						exit;
-					}
-				}
-			}
+	public function handle_2fa_post() {
+		if ( 'POST' !== $_SERVER['REQUEST_METHOD'] ) {
+			return;
 		}
 
-		login_header( __( '2단계 인증', 'vibe-2fa' ), $error );
+		if ( ! isset( $_POST['vibe_2fa_token'] ) ) {
+			return;
+		}
+
+		$token = sanitize_text_field( wp_unslash( $_POST['vibe_2fa_token'] ) );
+		$code  = isset( $_POST['vibe_2fa_code'] ) ? sanitize_text_field( wp_unslash( $_POST['vibe_2fa_code'] ) ) : '';
+
+		$data = $this->get_login_token_data( $token );
+		if ( empty( $data['user_id'] ) ) {
+			$this->set_error_message( $token, __( '인증 토큰이 만료되었습니다. 다시 로그인하세요.', 'vibe-2fa' ) );
+			return;
+		}
+
+		$user_id = (int) $data['user_id'];
+		if ( $this->is_rate_limited( $user_id ) ) {
+			$this->set_error_message( $token, __( '시도 횟수가 초과되었습니다. 잠시 후 다시 시도하세요.', 'vibe-2fa' ) );
+			return;
+		}
+
+		$secret = get_user_meta( $user_id, 'vibe_2fa_secret', true );
+		if ( empty( $secret ) || ! $this->totp->verify( $secret, $code ) ) {
+			$this->record_failed_attempt( $user_id );
+			$this->set_error_message( $token, __( '인증 코드가 올바르지 않습니다.', 'vibe-2fa' ) );
+			return;
+		}
+
+		$this->delete_login_token( $token );
+		wp_set_current_user( $user_id );
+		wp_set_auth_cookie( $user_id, true );
+		do_action( 'vibe_2fa_login_success', $user_id );
+
+		$redirect = ! empty( $data['redirect_to'] ) ? $data['redirect_to'] : admin_url();
+		wp_safe_redirect( $redirect );
+		exit;
+	}
+
+	public function render_2fa_inline() {
+		$token = isset( $_REQUEST['vibe_2fa_token'] ) ? sanitize_text_field( wp_unslash( $_REQUEST['vibe_2fa_token'] ) ) : '';
+		if ( '' === $token ) {
+			return;
+		}
+
+		$data = $this->get_login_token_data( $token );
+		if ( empty( $data['user_id'] ) ) {
+			return;
+		}
+
+		$error = $this->pop_error_message( $token );
 		?>
-		<form name="vibe-2fa-form" id="vibe-2fa-form" action="<?php echo esc_url( wp_login_url() ); ?>" method="post">
-			<p>
-				<label for="vibe_2fa_code"><?php esc_html_e( '인증 코드', 'vibe-2fa' ); ?></label>
-				<input type="text" name="vibe_2fa_code" id="vibe_2fa_code" class="input" value="" size="20" autocomplete="one-time-code" />
-			</p>
-			<input type="hidden" name="vibe_2fa_token" value="<?php echo esc_attr( $token ); ?>" />
-			<input type="hidden" name="action" value="vibe_2fa" />
-			<p class="submit">
-				<input type="submit" class="button button-primary button-large" value="<?php esc_attr_e( '확인', 'vibe-2fa' ); ?>" />
-			</p>
-		</form>
+		<div class="vibe-2fa-inline">
+			<h2><?php esc_html_e( '인증 코드', 'vibe-2fa' ); ?></h2>
+			<?php if ( $error ) : ?>
+				<div class="vibe-2fa-error"><?php echo esc_html( $error ); ?></div>
+			<?php endif; ?>
+			<form name="vibe-2fa-form" id="vibe-2fa-form" action="<?php echo esc_url( wp_login_url() ); ?>" method="post">
+				<p>
+					<label for="vibe_2fa_code"><?php esc_html_e( '인증 코드', 'vibe-2fa' ); ?></label>
+					<input type="text" name="vibe_2fa_code" id="vibe_2fa_code" class="input" value="" size="20" autocomplete="one-time-code" />
+				</p>
+				<input type="hidden" name="vibe_2fa_token" value="<?php echo esc_attr( $token ); ?>" />
+				<p class="submit">
+					<input type="submit" class="button button-primary button-large" value="<?php esc_attr_e( '확인', 'vibe-2fa' ); ?>" />
+				</p>
+			</form>
+		</div>
 		<?php
-		login_footer();
 	}
 }

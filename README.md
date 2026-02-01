@@ -10,17 +10,20 @@
 
 ## 주요 작업 내용
 
-- TOTP 기반 2단계 인증 플로우 구현 및 2FA 전용 로그인 화면 제공
+- TOTP 기반 2단계 인증 플로우 구현 및 로그인 화면 내 인증 코드 입력
 - 사용자 프로필에서 2FA 활성화/재설정 및 TOTP 시크릿 표시
 - 로그인 화면 reCAPTCHA v2 체크박스 연동(키 입력 시 서버 검증)
-- 관리자 설정 페이지 추가(2FA 강제, reCAPTCHA, XML-RPC 차단, WooCommerce/유출 암호 옵션 스켈레톤)
+- 관리자 설정 페이지 추가(2FA 강제, reCAPTCHA, 로그인 로고/크기, XML-RPC 차단, WooCommerce/유출 암호 옵션 스켈레톤)
 - 로그인 시도 실패 레이트리밋 스켈레톤 추가
+- 로그인 배경 다크 그레이 그라데이션 및 로고 커스터마이징 적용
 
 ## 기능 요약
 
 - TOTP 기반 2FA(6자리 코드)
 - Google Authenticator 등록 지원(otpauth URI 제공)
 - 로그인 reCAPTCHA v2 체크박스
+- 로그인 화면 로고 교체 및 크기 설정
+- 로그인 배경 다크 그레이 그라데이션
 - XML-RPC 로그인 차단 옵션
 - WooCommerce/유출 암호 차단 옵션(스켈레톤)
 
@@ -35,6 +38,7 @@
 3) 관리자 설정
 - 관리자 → 설정 → AI NEXT 2FA
 - reCAPTCHA 사용 시 Site Key/Secret Key 입력 후 저장
+- 로그인 로고를 바꾸려면 이미지 URL과 크기(px) 설정 후 저장
 
 4) 사용자 2FA 등록
 - 관리자 → 사용자 → 프로필

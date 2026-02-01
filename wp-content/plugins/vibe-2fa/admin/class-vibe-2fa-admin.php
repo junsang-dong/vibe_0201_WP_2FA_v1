@@ -81,6 +81,44 @@ class Vibe_2FA_Admin {
 		);
 
 		add_settings_field(
+			'login_logo_url',
+			__( '로그인 로고 URL', 'vibe-2fa' ),
+			array( $this, 'render_text' ),
+			'vibe_2fa',
+			'vibe_2fa_main',
+			array(
+				'key'         => 'login_logo_url',
+				'placeholder' => __( 'https://example.com/logo.png', 'vibe-2fa' ),
+			)
+		);
+
+		add_settings_field(
+			'login_logo_width',
+			__( '로고 너비(px)', 'vibe-2fa' ),
+			array( $this, 'render_number' ),
+			'vibe_2fa',
+			'vibe_2fa_main',
+			array(
+				'key' => 'login_logo_width',
+				'min' => 40,
+				'max' => 320,
+			)
+		);
+
+		add_settings_field(
+			'login_logo_height',
+			__( '로고 높이(px)', 'vibe-2fa' ),
+			array( $this, 'render_number' ),
+			'vibe_2fa',
+			'vibe_2fa_main',
+			array(
+				'key' => 'login_logo_height',
+				'min' => 40,
+				'max' => 320,
+			)
+		);
+
+		add_settings_field(
 			'block_xmlrpc',
 			__( 'XML-RPC 차단', 'vibe-2fa' ),
 			array( $this, 'render_checkbox' ),
@@ -123,6 +161,9 @@ class Vibe_2FA_Admin {
 		$options['enable_captcha']     = ! empty( $input['enable_captcha'] );
 		$options['recaptcha_site']     = isset( $input['recaptcha_site'] ) ? sanitize_text_field( $input['recaptcha_site'] ) : '';
 		$options['recaptcha_secret']   = isset( $input['recaptcha_secret'] ) ? sanitize_text_field( $input['recaptcha_secret'] ) : '';
+		$options['login_logo_url']     = isset( $input['login_logo_url'] ) ? esc_url_raw( $input['login_logo_url'] ) : '';
+		$options['login_logo_width']   = isset( $input['login_logo_width'] ) ? absint( $input['login_logo_width'] ) : 84;
+		$options['login_logo_height']  = isset( $input['login_logo_height'] ) ? absint( $input['login_logo_height'] ) : 84;
 		$options['block_xmlrpc']       = ! empty( $input['block_xmlrpc'] );
 		$options['enable_woocommerce'] = ! empty( $input['enable_woocommerce'] );
 		$options['enable_pwned']       = ! empty( $input['enable_pwned'] );
@@ -176,6 +217,17 @@ class Vibe_2FA_Admin {
 		$value       = isset( $options[ $key ] ) ? $options[ $key ] : '';
 		?>
 		<input type="text" class="regular-text" name="vibe_2fa_options[<?php echo esc_attr( $key ); ?>]" value="<?php echo esc_attr( $value ); ?>" placeholder="<?php echo esc_attr( $placeholder ); ?>" />
+		<?php
+	}
+
+	public function render_number( $args ) {
+		$options = $this->plugin->get_options();
+		$key     = $args['key'];
+		$min     = isset( $args['min'] ) ? (int) $args['min'] : 0;
+		$max     = isset( $args['max'] ) ? (int) $args['max'] : 999;
+		$value   = isset( $options[ $key ] ) ? (int) $options[ $key ] : 84;
+		?>
+		<input type="number" class="small-text" name="vibe_2fa_options[<?php echo esc_attr( $key ); ?>]" value="<?php echo esc_attr( $value ); ?>" min="<?php echo esc_attr( $min ); ?>" max="<?php echo esc_attr( $max ); ?>" />
 		<?php
 	}
 }
